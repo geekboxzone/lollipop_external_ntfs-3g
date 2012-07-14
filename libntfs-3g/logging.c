@@ -65,6 +65,14 @@ static int tab;
 # define  BROKEN_GCC_FORMAT_ATTRIBUTE __attribute__((format(printf, 6, 0)))
 #endif
 
+#if PLATFORM_SDK_VERSION >= 16
+#define LOGV(fmt,args...) ALOGV(fmt,##args)
+#define LOGD(fmt,args...) ALOGD(fmt,##args)
+#define LOGI(fmt,args...) ALOGI(fmt,##args)
+#define LOGW(fmt,args...) ALOGW(fmt,##args)
+#define LOGE(fmt,args...) ALOGE(fmt,##args)
+#endif
+
 /**
  * struct ntfs_logging - Control info for the logging system
  * @levels:	Bitfield of logging levels

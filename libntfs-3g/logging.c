@@ -337,7 +337,7 @@ int ntfs_log_redirect(const char *function, const char *file,
 	va_end(args);
 	snprintf(&(szBuf[sizeof(szBuf)/2]), sizeof(szBuf)/2, 
 		", file: %s, function: %s, line: %d", file, function, line);
-//	LOGD("%s", szBuf);
+	LOGD("%s", szBuf);
 	return 0;
     #else
 	int olderr = errno;

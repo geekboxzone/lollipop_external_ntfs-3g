@@ -37,7 +37,8 @@ LOCAL_MODULE_TAGS := optional
 
 LOCAL_SHARED_LIBRARIES := \
 	libc \
-	libutils 
+	libutils	\
+	liblog 
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/.. \

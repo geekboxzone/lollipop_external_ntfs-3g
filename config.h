@@ -15,11 +15,8 @@
    */
 /* #undef ENABLE_UUID */
 
-#ifndef _OFF_T_DEFINED_
+/* off_t has already defined by libc in /sys/types.h since Android Lollipop */
 #define _OFF_T_DEFINED_
-#define off_t long long
-#endif
-
 
 /* Define to 1 if using internal fuse */
 #define FUSE_INTERNAL 1

@@ -380,3 +380,5 @@
 
 /* Define to `unsigned int' if <sys/types.h> does not define. */
 /* #undef size_t */
+#include <sys/types.h>
+#define off_t long long

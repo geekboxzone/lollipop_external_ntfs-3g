@@ -24,11 +24,11 @@ static inline void fuse_mutex_init(pthread_mutex_t *mut)
 
 #ifdef HAVE_STRUCT_STAT_ST_ATIM
 /* Linux */
-#define ST_ATIM_NSEC(stbuf) ((stbuf)->st_atime_nsec)
-#define ST_CTIM_NSEC(stbuf) ((stbuf)->st_ctime_nsec)
-#define ST_MTIM_NSEC(stbuf) ((stbuf)->st_mtime_nsec)
-#define ST_ATIM_NSEC_SET(stbuf, val) (stbuf)->st_atime_nsec = (val)
-#define ST_MTIM_NSEC_SET(stbuf, val) (stbuf)->st_mtime_nsec = (val)
+#define ST_ATIM_NSEC(stbuf) ((stbuf)->st_atim.tv_nsec)
+#define ST_CTIM_NSEC(stbuf) ((stbuf)->st_ctim.tv_nsec)
+#define ST_MTIM_NSEC(stbuf) ((stbuf)->st_mtim.tv_nsec)
+#define ST_ATIM_NSEC_SET(stbuf, val) (stbuf)->st_atim.tv_nsec = (val)
+#define ST_MTIM_NSEC_SET(stbuf, val) (stbuf)->st_mtim.tv_nsec = (val)
 #elif defined(HAVE_STRUCT_STAT_ST_ATIMESPEC)
 /* FreeBSD */
 #define ST_ATIM_NSEC(stbuf) ((stbuf)->st_atimespec.tv_nsec)

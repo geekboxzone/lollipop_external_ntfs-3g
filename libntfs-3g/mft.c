@@ -5,6 +5,7 @@
  * Copyright (c) 2004-2005 Richard Russon
  * Copyright (c) 2004-2008 Szabolcs Szakacsits
  * Copyright (c)      2005 Yura Pakhuchiy
+ * Copyright (c)      2014 Jean-Pierre Andre
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -216,8 +217,10 @@ int ntfs_mft_record_check(const ntfs_volume *vol, const MFT_REF mref,
 	int ret = -1;
 	
 	if (!ntfs_is_file_record(m->magic)) {
-		ntfs_log_error("Record %llu has no FILE magic (0x%x)\n",
-			       (unsigned long long)MREF(mref), *(le32 *)m);
+		if (!NVolNoFixupWarn(vol))
+			ntfs_log_error("Record %llu has no FILE magic (0x%x)\n",
+				(unsigned long long)MREF(mref),
+				(int)le32_to_cpu(*(le32*)m));
 		goto err_out;
 	}
 	
@@ -1190,7 +1193,7 @@ undo_alloc:
 static int ntfs_mft_record_init(ntfs_volume *vol, s64 size)
 {
 	int ret = -1;
-	ntfs_attr *mft_na, *mftbmp_na;
+	ntfs_attr *mft_na;
 	s64 old_data_initialized, old_data_size;
 	ntfs_attr_search_ctx *ctx;
 	
@@ -1199,7 +1202,6 @@ static int ntfs_mft_record_init(ntfs_volume *vol, s64 size)
 	/* NOTE: Caller must sanity check vol, vol->mft_na and vol->mftbmp_na */
 	
 	mft_na = vol->mft_na;
-	mftbmp_na = vol->mftbmp_na;
 	
 	/*
 	 * The mft record is outside the initialized data. Extend the mft data
@@ -1295,14 +1297,13 @@ undo_data_init:
 static int ntfs_mft_rec_init(ntfs_volume *vol, s64 size)
 {
 	int ret = -1;
-	ntfs_attr *mft_na, *mftbmp_na;
+	ntfs_attr *mft_na;
 	s64 old_data_initialized, old_data_size;
 	ntfs_attr_search_ctx *ctx;
 	
 	ntfs_log_enter("Entering\n");
 	
 	mft_na = vol->mft_na;
-	mftbmp_na = vol->mftbmp_na;
 	
 	if (size > mft_na->allocated_size || size > mft_na->initialized_size) {
 		errno = EIO;
@@ -1354,7 +1355,7 @@ undo_data_init:
 	goto out;
 }
 
-static ntfs_inode *ntfs_mft_rec_alloc(ntfs_volume *vol)
+ntfs_inode *ntfs_mft_rec_alloc(ntfs_volume *vol, BOOL mft_data)
 {
 	s64 ll, bit;
 	ntfs_attr *mft_na, *mftbmp_na;
@@ -1363,6 +1364,7 @@ static ntfs_inode *ntfs_mft_rec_alloc(ntfs_volume *vol)
 	ntfs_inode *base_ni;
 	int err;
 	le16 seq_no, usn;
+	BOOL forced_mft_data;
 
 	ntfs_log_enter("Entering\n");
 
@@ -1371,7 +1373,38 @@ static ntfs_inode *ntfs_mft_rec_alloc(ntfs_volume *vol)
 
 	base_ni = mft_na->ni;
 
-	bit = ntfs_mft_bitmap_find_free_rec(vol, base_ni);
+	/*
+	 * The first extent containing $MFT:$AT_DATA is better located
+	 * in record 15 to make sure it can be read at mount time.
+	 * The record 15 is prereserved as a base inode with no
+	 * extents and no name, and it is marked in use.
+	 */
+	forced_mft_data = FALSE;
+	if (mft_data) {
+		ntfs_inode *ext_ni = ntfs_inode_open(vol, FILE_mft_data);
+			/*
+			 * If record 15 cannot be opened, it is probably in
+			 * use as an extent. Apply standard procedure for
+			 * further extents.
+			 */
+		if (ext_ni) {
+			/*
+			 * Make sure record 15 is a base extent and has
+			 * no extents.
+			 * Also make sure it has no name : a base inode with
+			 * no extents and no name cannot be in use.
+			 * Otherwise apply standard procedure.
+			 */
+   			if (!ext_ni->mrec->base_mft_record
+			    && !ext_ni->nr_extents)
+				forced_mft_data = TRUE;
+			ntfs_inode_close(ext_ni);
+		}
+	}
+	if (forced_mft_data)
+		bit = FILE_mft_data;
+	else
+		bit = ntfs_mft_bitmap_find_free_rec(vol, base_ni);
 	if (bit >= 0)
 		goto found_free_rec;
 
@@ -1408,7 +1441,9 @@ found_free_rec:
 		goto undo_mftbmp_alloc;
 	}
 	/* Sanity check that the mft record is really not in use. */
-	if (ntfs_is_file_record(m->magic) && (m->flags & MFT_RECORD_IN_USE)) {
+	if (!forced_mft_data
+	    && (ntfs_is_file_record(m->magic)
+	    && (m->flags & MFT_RECORD_IN_USE))) {
 		ntfs_log_error("Inode %lld is used but it wasn't marked in "
 			       "$MFT bitmap. Fixed.\n", (long long)bit);
 		free(m);
@@ -1524,8 +1559,9 @@ err_out:
  * @base_ni is NULL we start where we last stopped and we perform wrap around
  * when we reach the end.  Note, we do not try to allocate mft records below
  * number 24 because numbers 0 to 15 are the defined system files anyway and 16
- * to 24 are special in that they are used for storing extension mft records
- * for the $DATA attribute of $MFT.  This is required to avoid the possibility
+ * to 24 are used for storing extension mft records or used by chkdsk to store
+ * its log. However the record number 15 is dedicated to the first extent to
+ * the $DATA attribute of $MFT.  This is required to avoid the possibility
  * of creating a run list with a circular dependence which once written to disk
  * can never be read in again.  Windows will only use records 16 to 24 for
  * normal files if the volume is completely out of space.  We never use them
@@ -1584,6 +1620,7 @@ err_out:
  * when reading the bitmap but if we are careful, we should be able to avoid
  * all problems.
  */
+//ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, ntfs_inode *base_ni)
 ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, ntfs_inode *base_ni)
 {
 	s64 ll, bit;
@@ -1605,7 +1642,7 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, ntfs_inode *base_ni)
 	}
 	
 	if (ntfs_is_mft(base_ni)) {
-		ni = ntfs_mft_rec_alloc(vol);
+		ni = ntfs_mft_rec_alloc(vol, FALSE);
 		goto out;
 	}
 

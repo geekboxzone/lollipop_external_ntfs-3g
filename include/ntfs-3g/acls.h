@@ -170,6 +170,9 @@ int ntfs_merge_mode_posix(struct POSIX_SECURITY *pxdesc, mode_t mode);
 struct POSIX_SECURITY *ntfs_build_inherited_posix(
 		const struct POSIX_SECURITY *pxdesc, mode_t mode,
 		mode_t umask, BOOL isdir);
+struct POSIX_SECURITY *ntfs_build_basic_posix(
+		const struct POSIX_SECURITY *pxdesc, mode_t mode,
+		mode_t umask, BOOL isdir);
 struct POSIX_SECURITY *ntfs_replace_acl(const struct POSIX_SECURITY *oldpxdesc,
 		const struct POSIX_ACL *newacl, int count, BOOL deflt);
 struct POSIX_SECURITY *ntfs_build_permissions_posix(
@@ -185,7 +188,8 @@ char *ntfs_build_descr_posix(struct MAPPING* const mapping[],
 #endif /* POSIXACLS */
 
 int ntfs_inherit_acl(const ACL *oldacl, ACL *newacl,
-			const SID *usid, const SID *gsid, BOOL fordir);
+			const SID *usid, const SID *gsid,
+			BOOL fordir, le16 inherited);
 int ntfs_build_permissions(const char *securattr,
 			const SID *usid, const SID *gsid, BOOL isdir);
 char *ntfs_build_descr(mode_t mode,

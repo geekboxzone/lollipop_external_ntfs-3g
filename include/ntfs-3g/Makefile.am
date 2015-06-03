@@ -15,10 +15,12 @@ headers = \
 	device.h	\
 	device_io.h	\
 	dir.h		\
+	ea.h		\
 	efs.h		\
 	endians.h	\
 	index.h		\
 	inode.h		\
+	ioctl.h		\
 	layout.h	\
 	lcnalloc.h	\
 	logfile.h	\
@@ -29,6 +31,7 @@ headers = \
 	ntfstime.h	\
 	object_id.h	\
 	param.h	\
+	realpath.h	\
 	reparse.h	\
 	runlist.h	\
 	security.h	\

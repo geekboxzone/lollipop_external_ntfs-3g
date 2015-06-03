@@ -20,9 +20,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifdef HAVE_SYS_STATVFS_H
 #include <sys/statvfs.h>
-#endif
 #include <sys/uio.h>
 
 #ifdef __cplusplus
@@ -103,10 +101,8 @@ struct fuse_ctx {
 	/** Thread ID of the calling process */
 	pid_t pid;
 
-#ifdef POSIXACLS
 	/** Umask of the calling process (introduced in version 2.8) */
 	mode_t umask;
-#endif
 };
 
 /* 'to_set' flags in setattr */
@@ -807,6 +803,37 @@ struct fuse_lowlevel_ops {
 	 */
 	void (*bmap) (fuse_req_t req, fuse_ino_t ino, size_t blocksize,
 		      uint64_t idx);
+	/**
+	 * Ioctl
+	 *
+	 * Note: For unrestricted ioctls (not allowed for FUSE
+	 * servers), data in and out areas can be discovered by giving
+	 * iovs and setting FUSE_IOCTL_RETRY in @flags.  For
+	 * restricted ioctls, kernel prepares in/out data area
+	 * according to the information encoded in cmd.
+	 *
+	 * Introduced in version 2.8
+	 *
+	 * Valid replies:
+	 *   fuse_reply_ioctl_retry
+	 *   fuse_reply_ioctl
+	 *   fuse_reply_ioctl_iov
+	 *   fuse_reply_err
+	 *
+	 * @param req request handle
+	 * @param ino the inode number
+	 * @param cmd ioctl command
+	 * @param arg ioctl argument
+	 * @param fi file information
+	 * @param flags for FUSE_IOCTL_* flags
+	 * @param in_buf data fetched from the caller
+	 * @param in_bufsz number of fetched bytes
+	 * @param out_bufsz maximum size of output data
+	 */
+	void (*ioctl) (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
+		       struct fuse_file_info *fi, unsigned flags,
+		       const void *in_buf, size_t in_bufsz, size_t out_bufsz);
+
 };
 
 /**
@@ -954,9 +981,7 @@ int fuse_reply_iov(fuse_req_t req, const struct iovec *iov, int count);
  * @param stbuf filesystem statistics
  * @return zero for success, -errno for failure to send reply
  */
-#ifdef HAVE_SYS_STATVFS_H
 int fuse_reply_statfs(fuse_req_t req, const struct statvfs *stbuf);
-#endif
 
 /**
  * Reply with needed buffer size
@@ -1026,6 +1051,20 @@ size_t fuse_add_direntry(fuse_req_t req, char *buf, size_t bufsize,
 			 const char *name, const struct stat *stbuf,
 			 off_t off);
 
+/**
+ * Reply to finish ioctl
+ *
+ * Possible requests:
+ * ioctl
+ *
+ * @param req request handle
+ * @param result result to be passed to the caller
+ * @param buf buffer containing output data
+ * @param size length of output data
+ */
+int fuse_reply_ioctl(fuse_req_t req, int result, const void *buf, size_t size);
+
+
 /* ----------------------------------------------------------- *
  * Utility functions					       *
  * ----------------------------------------------------------- */
@@ -1082,6 +1121,13 @@ int fuse_req_interrupted(fuse_req_t req);
 /* ----------------------------------------------------------- *
  * Filesystem setup					       *
  * ----------------------------------------------------------- */
+
+#ifdef __SOLARIS__
+
+/* Deprecated, don't use */
+int fuse_lowlevel_is_lib_option(const char *opt);
+
+#endif /* __SOLARIS__ */
 
 /**
  * Create a low level session

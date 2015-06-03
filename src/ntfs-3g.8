@@ -1,10 +1,10 @@
 .\" Copyright (c) 2005-2006 Yura Pakhuchiy.
 .\" Copyright (c) 2005 Richard Russon.
 .\" Copyright (c) 2006-2009 Szabolcs Szakacsits.
-.\" Copyright (c) 2009 Jean-Pierre Andre
+.\" Copyright (c) 2009-2014 Jean-Pierre Andre
 .\" This file may be copied under the terms of the GNU Public License.
 .\"
-.TH NTFS-3G 8 "February 2010" "ntfs-3g 2011.4.12"
+.TH NTFS-3G 8 "Mar 2014" "ntfs-3g 2015.3.14"
 .SH NAME
 ntfs-3g \- Third Generation Read/Write NTFS Driver
 .SH SYNOPSIS
@@ -36,6 +36,22 @@ a few differences mentioned below in relevant options descriptions.
 .PP
 The \fIvolume\fR to be mounted can be either a block device or 
 an image file.
+.SS Windows hibernation and fast restarting
+On computers which can be dual-booted into Windows or Linux, Windows has
+to be fully shut down before booting into Linux, otherwise the NTFS file
+systems on internal disks may be left in an inconsistent state and changes
+made by Linux may be ignored by Windows.
+.P
+So, Windows may not be left in hibernation when starting Linux, in order
+to avoid inconsistencies. Moreover, the fast restart feature available on
+recent Windows systems has to be disabled. This can be achieved by issuing
+as an Administrator the Windows command which disables both
+hibernation and fast restarting :
+.RS
+.sp
+powercfg /h off
+.sp
+.RE
 .SS Access Handling and Security
 By default, files and directories are owned by the effective 
 user and group of the mounting process, and everybody has
@@ -136,10 +152,11 @@ when a user mapping file is present and the
 mount option is not set.
 .TP
 .B inherit
-When creating a new file, set its initial ownership and protections
+When creating a new file, set its initial protections
 according to inheritance rules defined in parent directory. These rules
 deviate from Posix specifications, but yield a better Windows
-compatibility.
+compatibility. The \fBpermissions\fR option or a valid user mapping file
+is required for this option to be effective.
 .TP
 .B ro
 Mount filesystem read\-only. Useful if Windows is hibernated or the
@@ -198,6 +215,14 @@ this option doesn't break applications that need to know
 if a file has been read since the last time it was modified.
 This is the default behaviour.
 .TP
+.B delay_mtime[= value]
+Only update the file modification time and the file change time of a file
+when it is closed or when the indicated delay since the previous update has
+elapsed. The argument is a number of seconds, with a default value of 60.
+This is mainly useful for big files which are kept open for a long
+time and written to without changing their size, such as databases or file
+system images mounted as loop.
+.TP
 .B show_sys_files
 Show the metafiles in directory listings. Otherwise the default behaviour is
 to hide the metafiles, which are special files used to store the NTFS
@@ -220,13 +245,29 @@ Set the hidden flag in the NTFS attribute for created files and directories
 whose first character of the name is a dot. Such files and directories
 normally do not appear in directory listings, and when the flag is set
 they do not appear in Windows directory displays either.
+When a file is renamed or linked with a new name, the hidden flag is
+adjusted to the latest name.
 .TP
 .B windows_names
 This option prevents files, directories and extended attributes to be
-created with a name not allowed by windows, either because it contains
-some not allowed character (which are the nine characters " * / : < > ? \\ | and
-those whose code is less than 0x20) or because the last character is a space
-or a dot. Existing such files can still be read (and renamed).
+created with a name not allowed by windows, because
+.RS
+.RS
+.sp
+- it contains some not allowed character,
+.br
+- or the last character is a space or a dot,
+.br
+- or the name is reserved.
+.sp
+.RE
+The forbidden characters are the nine characters " * / : < > ? \\ | and
+those whose code is less than 0x20, and
+the reserved names are CON, PRN, AUX, NUL, COM1..COM9, LPT1..LPT9,
+with no suffix or followed by a dot.
+.sp
+Existing such files can still be read (and renamed).
+.RE
 .TP
 .B allow_other
 This option overrides the security measure restricting file access
@@ -240,12 +281,15 @@ The default is infinite.  Note that the size of read requests is
 limited anyway to 32 pages (which is 128kbyte on i386).
 .TP
 .B silent
-Do nothing, without returning any error, on chmod and chown operations,
+Do nothing, without returning any error, on chmod and chown operations
+and on permission checking errors,
 when the \fBpermissions\fR option is not set and no user mapping file
-is defined. This option is on by default.
+is defined. This option is on by default, and when set off (through option
+\fBno_def_opts\fR) ownership and permissions parameters have to be set.
 .TP
 .B no_def_opts
-By default ntfs-3g acts as if "silent" (ignore errors on chmod and chown),
+By default ntfs-3g acts as if "silent" (ignore permission errors when
+permissions are not enabled),
 "allow_other" (allow any user to access files) and "nonempty"
 (allow mounting on non-empty directories) were set, and "no_def_opts"
 cancels these default options.
@@ -276,12 +320,17 @@ directories marked for compression. A directory is marked for compression by
 setting the bit 11 (value 0x00000800) in its Windows attribute. In such a
 directory, new files are created compressed and new subdirectories are
 themselves marked for compression. The option and the flag have no effect
-on existing files.
+on existing files. Currently this is the default option.
 .TP
 .B nocompression
 This option disables creating new transparently compressed files in directories
 marked for compression. Existing compressed files can still be read and
-updated. Currently this is the default option.
+updated.
+.TP
+.B big_writes
+This option prevents fuse from splitting write buffers into 4K chunks,
+enabling big write buffers to be transferred from the application in a
+single step (up to some system limit, generally 128K bytes).
 .TP
 .B debug
 Makes ntfs-3g to print a lot of debug output from libntfs-3g and FUSE.
@@ -363,8 +412,10 @@ to be the owner of all files:
 .B ntfs-3g /dev/sda5 /home/user/mnt \-o ro,uid=1000
 .sp
 .RE
-/etc/fstab entry for the above:
+/etc/fstab entry for the above (the sixth and last field has to be zero to
+avoid a file system check at boot time) :
 .RS
+.sp
 .B /dev/sda5 /home/user/mnt ntfs\-3g ro,uid=1000 0 0
 .sp
 .RE

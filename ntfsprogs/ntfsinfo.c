@@ -8,6 +8,7 @@
  * Copyright (c) 2004-2005 Yuval Fledel
  * Copyright (c) 2004-2007 Yura Pakhuchiy
  * Copyright (c)      2005 Cristian Klein
+ * Copyright (c) 2011-2014 Jean-Pierre Andre
  *
  * This utility will dump a file's attributes.
  *
@@ -94,6 +95,11 @@ static struct options {
 	int	 mft;		/* Dump information about the volume as well */
 } opts;
 
+struct RUNCOUNT {
+	unsigned long runs;
+	unsigned long fragments;
+} ;
+
 /**
  * version - Print version information about the program
  *
@@ -113,6 +119,7 @@ static void version(void)
 	printf("    2003      Leonard Norrgård\n");
 	printf("    2004-2005 Yuval Fledel\n");
 	printf("    2004-2007 Yura Pakhuchiy\n");
+	printf("    2011-2014 Jean-Pierre Andre\n");
 	printf("\n%s\n%s%s\n", ntfs_gpl, ntfs_bugs, ntfs_home);
 }
 
@@ -297,7 +304,8 @@ static int parse_options(int argc, char *argv[])
 	if (help || err)
 		usage();
 
-	return (!err && !help && !ver);
+		/* tri-state 0 : done, 1 : error, -1 : proceed */
+	return (err ? 1 : (help || ver ? 0 : -1));
 }
 
 
@@ -412,9 +420,16 @@ static void ntfs_dump_volume(ntfs_volume *vol)
 	printf("\tDevice state: %lu\n", vol->dev->d_state);
 	printf("\tVolume Name: %s\n", vol->vol_name);
 	printf("\tVolume State: %lu\n", vol->state);
+	printf("\tVolume Flags: 0x%04x", (int)vol->flags);
+	if (vol->flags & VOLUME_IS_DIRTY)
+		printf(" DIRTY");
+	if (vol->flags & VOLUME_MODIFIED_BY_CHKDSK)
+		printf(" MODIFIED_BY_CHKDSK");
+	printf("\n");
 	printf("\tVolume Version: %u.%u\n", vol->major_ver, vol->minor_ver);
 	printf("\tSector Size: %hu\n", vol->sector_size);
 	printf("\tCluster Size: %u\n", (unsigned int)vol->cluster_size);
+	printf("\tIndex Block Size: %u\n", (unsigned int)vol->indx_record_size);
 	printf("\tVolume Size in Clusters: %lld\n",
 			(long long)vol->nr_clusters);
 
@@ -429,6 +444,12 @@ static void ntfs_dump_volume(ntfs_volume *vol)
 			(long long)vol->data1_zone_pos);
 	printf("\tCurrent Position in Second Data Zone: %lld\n",
 			(long long)vol->data2_zone_pos);
+	printf("\tAllocated clusters %lld (%2.1lf%%)\n",
+			(long long)vol->mft_na->allocated_size
+				>> vol->cluster_size_bits,
+			100.0*(vol->mft_na->allocated_size
+				>> vol->cluster_size_bits)
+				/ vol->nr_clusters);
 	printf("\tLCN of Data Attribute for FILE_MFT: %lld\n",
 			(long long)vol->mft_lcn);
 	printf("\tFILE_MFTMirr Size: %d\n", vol->mftmirr_size);
@@ -436,6 +457,8 @@ static void ntfs_dump_volume(ntfs_volume *vol)
 			(long long)vol->mftmirr_lcn);
 	printf("\tSize of Attribute Definition Table: %d\n",
 			(int)vol->attrdef_len);
+	printf("\tNumber of Attached Extent Inodes: %d\n",
+			(int)vol->mft_ni->nr_extents);
 
 	printf("FILE_Bitmap Information \n");
 	printf("\tFILE_Bitmap MFT Record Number: %llu\n",
@@ -443,7 +466,7 @@ static void ntfs_dump_volume(ntfs_volume *vol)
 	printf("\tState of FILE_Bitmap Inode: %lu\n", vol->lcnbmp_ni->state);
 	printf("\tLength of Attribute List: %u\n",
 			(unsigned int)vol->lcnbmp_ni->attr_list_size);
-	printf("\tAttribute List: %s\n", vol->lcnbmp_ni->attr_list);
+	/* JPA	printf("\tAttribute List: %s\n", vol->lcnbmp_ni->attr_list); */
 	printf("\tNumber of Attached Extent Inodes: %d\n",
 			(int)vol->lcnbmp_ni->nr_extents);
 	/* FIXME: need to add code for the union if nr_extens != 0, but
@@ -472,6 +495,11 @@ static void ntfs_dump_volume(ntfs_volume *vol)
 			vol->lcnbmp_na->compression_block_size_bits);
 	printf("\tCompression Block Clusters: %u\n",
 			vol->lcnbmp_na->compression_block_clusters);
+	if (!ntfs_volume_get_free_space(vol))
+		printf("\tFree Clusters: %lld (%2.1lf%%)\n",
+				(long long)vol->free_clusters,
+				100.0*vol->free_clusters
+					/(double)vol->nr_clusters);
 
 	//TODO: Still need to add a few more attributes
 }
@@ -483,6 +511,8 @@ static void ntfs_dump_volume(ntfs_volume *vol)
  */
 static void ntfs_dump_flags(const char *indent, ATTR_TYPES type, le32 flags)
 {
+	const le32 original_flags = flags;
+
 	printf("%sFile attributes:\t", indent);
 	if (flags & FILE_ATTR_READONLY) {
 		printf(" READONLY");
@@ -555,7 +585,7 @@ static void ntfs_dump_flags(const char *indent, ATTR_TYPES type, le32 flags)
 	if (flags)
 		printf(" UNKNOWN: 0x%08x", (unsigned int)le32_to_cpu(flags));
 	/* Print all the flags in hex. */
-	printf(" (0x%08x)\n", (unsigned)le32_to_cpu(flags));
+	printf(" (0x%08x)\n", (unsigned)le32_to_cpu(original_flags));
 }
 
 /**
@@ -1246,7 +1276,7 @@ static const char * ntfs_dump_lcn(LCN lcn)
 }
 
 static void ntfs_dump_attribute_header(ntfs_attr_search_ctx *ctx,
-		ntfs_volume *vol)
+		ntfs_volume *vol, struct RUNCOUNT *runcount)
 {
 	ATTR_RECORD *a = ctx->attr;
 
@@ -1343,17 +1373,25 @@ static void ntfs_dump_attribute_header(ntfs_attr_search_ctx *ctx,
 		rl = ntfs_mapping_pairs_decompress(vol, a, NULL);
 		if (rl) {
 			runlist *rlc = rl;
+			LCN next_lcn;
 
+			next_lcn = LCN_HOLE;
 			// TODO: Switch this to properly aligned hex...
 			printf("\tRunlist:\tVCN\t\tLCN\t\tLength\n");
+			runcount->fragments++;
 			while (rlc->length) {
-				if (rlc->lcn >= 0)
+				runcount->runs++;
+				if (rlc->lcn >= 0) {
 					printf("\t\t\t0x%llx\t\t0x%llx\t\t"
 							"0x%llx\n",
 							(long long)rlc->vcn,
 							(long long)rlc->lcn,
 							(long long)rlc->length);
-				else
+					if ((next_lcn >= 0)
+					    && (rlc->lcn != next_lcn))
+						runcount->fragments++;
+					next_lcn = rlc->lcn + rlc->length;
+				} else
 					printf("\t\t\t0x%llx\t\t%s\t"
 							"0x%llx\n",
 							(long long)rlc->vcn,
@@ -1752,7 +1790,12 @@ static void ntfs_dump_attr_index_root(ATTR_RECORD *attr, ntfs_inode *ni)
 	printf("\tIndex Block Size:\t %u (0x%x)\n",
 			(unsigned)le32_to_cpu(index_root->index_block_size),
 			(unsigned)le32_to_cpu(index_root->index_block_size));
-	printf("\tClusters Per Block:\t %u (0x%x)\n",
+	if (le32_to_cpu(index_root->index_block_size) < ni->vol->cluster_size)
+		printf("\t512-byte Units Per Block:\t %u (0x%x)\n",
+			(unsigned)index_root->clusters_per_index_block,
+			(unsigned)index_root->clusters_per_index_block);
+	else
+		printf("\tClusters Per Block:\t %u (0x%x)\n",
 			(unsigned)index_root->clusters_per_index_block,
 			(unsigned)index_root->clusters_per_index_block);
 
@@ -1937,8 +1980,12 @@ static void ntfs_dump_attr_ea_information(ATTR_RECORD *attr)
  */
 static void ntfs_dump_attr_ea(ATTR_RECORD *attr, ntfs_volume *vol)
 {
-	EA_ATTR *ea;
+	const EA_ATTR *ea;
+	const u8 *pvalue;
 	u8 *buf = NULL;
+	const le32 *pval;
+	int offset;
+	int cnt;
 	s64 data_size;
 
 	if (attr->non_resident) {
@@ -1976,6 +2023,7 @@ static void ntfs_dump_attr_ea(ATTR_RECORD *attr, ntfs_volume *vol)
 			return;
 		ea = (EA_ATTR*)((u8*)attr + le16_to_cpu(attr->value_offset));
 	}
+	offset = 0;
 	while (1) {
 		printf("\n\tEA flags:\t\t ");
 		if (ea->flags) {
@@ -1992,21 +2040,36 @@ static void ntfs_dump_attr_ea(ATTR_RECORD *attr, ntfs_volume *vol)
 		printf("\tValue length:\t %d (0x%x)\n",
 				(unsigned)le16_to_cpu(ea->value_length),
 				(unsigned)le16_to_cpu(ea->value_length));
+			/* Name expected to be null terminated ? */
 		printf("\tName:\t\t '%s'\n", ea->name);
 		printf("\tValue:\t\t ");
 		if (ea->name_length == 11 &&
 				!strncmp((const char*)"SETFILEBITS",
-				(const char*)ea->name, 11))
-			printf("0%o\n", (unsigned)le32_to_cpu(*(le32*)
-					(ea->value + ea->name_length + 1)));
-		else
-			printf("'%s'\n", ea->value + ea->name_length + 1);
-		if (ea->next_entry_offset)
-			ea = (EA_ATTR*)((u8*)ea +
-					le32_to_cpu(ea->next_entry_offset));
-		else
+				(const char*)ea->name, 11)) {
+			pval = (const le32*)(ea->value + ea->name_length + 1);
+			printf("0%lo\n", (unsigned long)le32_to_cpu(*pval));
+		} else {
+			/* No alignment for value */
+			pvalue = ea->value + ea->name_length + 1;
+			/* Hex show a maximum of 32 bytes */
+			cnt = le16_to_cpu(ea->value_length);
+			printf(cnt ? "0x" : "(NONE)");
+			if (cnt > 32)
+				cnt = 32;
+			while (cnt-- > 0)
+				printf("%02x",*pvalue++);
+			if (le16_to_cpu(ea->value_length) > 32)
+				printf("...\n");
+			else
+				printf("\n");
+		}
+		if (ea->next_entry_offset) {
+			offset += le32_to_cpu(ea->next_entry_offset);
+			ea = (const EA_ATTR*)((const u8*)ea
+					+ le32_to_cpu(ea->next_entry_offset));
+		} else
 			break;
-		if ((u8*)ea - buf >= data_size)
+		if (offset >= data_size)
 			break;
 	}
 	free(buf);
@@ -2181,8 +2244,11 @@ static void ntfs_dump_inode_general_info(ntfs_inode *inode)
  */
 static void ntfs_dump_file_attributes(ntfs_inode *inode)
 {
+	struct RUNCOUNT runcount;
 	ntfs_attr_search_ctx *ctx = NULL;
 
+	runcount.runs = 0;
+	runcount.fragments = 0;
 	/* then start enumerating attributes
 	   see ntfs_attr_lookup documentation for detailed explanation */
 	ctx = ntfs_attr_get_search_ctx(inode, NULL);
@@ -2196,7 +2262,7 @@ static void ntfs_dump_file_attributes(ntfs_inode *inode)
 			continue;
 		}
 
-		ntfs_dump_attribute_header(ctx, inode->vol);
+		ntfs_dump_attribute_header(ctx, inode->vol, &runcount);
 
 		switch (ctx->attr->type) {
 		case AT_STANDARD_INFORMATION:
@@ -2259,6 +2325,10 @@ static void ntfs_dump_file_attributes(ntfs_inode *inode)
 				"enumerating attributes");
 	} else {
 		printf("End of inode reached\n");
+		if (opts.verbose) {
+			printf("Total runs: %lu (fragments: %lu)\n",
+					runcount.runs, runcount.fragments);
+		}
 	}
 
 	/* close all data-structures we used */
@@ -2277,20 +2347,22 @@ static void ntfs_dump_file_attributes(ntfs_inode *inode)
 int main(int argc, char **argv)
 {
 	ntfs_volume *vol;
+	int res;
 
 	setlinebuf(stdout);
 
 	ntfs_log_set_handler(ntfs_log_handler_outerr);
 
-	if (!parse_options(argc, argv)) {
+	res = parse_options(argc, argv);
+	if (res > 0)
 		printf("Failed to parse command line options\n");
-		exit(1);
-	}
+	if (res >= 0)
+		exit(res);
 
 	utils_set_locale();
 
-	vol = utils_mount_volume(opts.device, MS_RDONLY |
-			(opts.force ? MS_RECOVER : 0));
+	vol = utils_mount_volume(opts.device, NTFS_MNT_RDONLY |
+			(opts.force ? NTFS_MNT_RECOVER : 0));
 	if (!vol) {
 		printf("Failed to open '%s'.\n", opts.device);
 		exit(1);

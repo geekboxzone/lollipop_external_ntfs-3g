@@ -27,6 +27,17 @@ web site at
 
 	http://www.tuxera.com/community/
 
+LICENSES
+========
+
+All the NTFS related components : the file system drivers, the ntfsprogs
+utilities and the shared library libntfs-3g are distributed under the terms
+of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version. See the included file COPYING.
+
+The fuse-lite library is distributed under the terms of the GNU LGPLv2.
+See the included file COPYING.LIB.
 
 QUICK INSTALLATION
 ==================
@@ -51,6 +62,12 @@ Below are a few specific options to ./configure :
 	--enable-posix-acls : enable support for Posix ACLs
 	--enable-xattr-mappings : enable system extended attributes mappings
 	--with-fuse=external : use external fuse (overriding Linux default)
+
+There are also a few make targets for building parts :
+	make libntfs : only build the libntfs-3g library
+	make libs : only build libntfs-3g (and libfuse-lite, if relevant)
+	make drivers : only build drivers and libraries, without ntfsprogs
+	make ntfsprogs : only build ntfsprogs and libntfs-3g, without drivers
 
 Non-Linux: Please see 
 

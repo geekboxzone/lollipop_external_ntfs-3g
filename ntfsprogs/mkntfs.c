@@ -1,12 +1,12 @@
 /**
  * mkntfs - Part of the Linux-NTFS project.
  *
- * Copyright (c) 2000-2007 Anton Altaparmakov
+ * Copyright (c) 2000-2011 Anton Altaparmakov
  * Copyright (c) 2001-2005 Richard Russon
  * Copyright (c) 2002-2006 Szabolcs Szakacsits
  * Copyright (c) 2005      Erik Sornes
  * Copyright (c) 2007      Yura Pakhuchiy
- * Copyright (c) 2010      Jean-Pierre Andre
+ * Copyright (c) 2010-2014 Jean-Pierre Andre
  *
  * This utility will create an NTFS 1.2 or 3.1 volume on a user
  * specified (block) device.
@@ -140,6 +140,11 @@
 #include "unistr.h"
 #include "misc.h"
 
+#if defined(__sun) && defined (__SVR4)
+#undef basename
+#define basename(name) name
+#endif
+
 typedef enum { WRITE_STANDARD, WRITE_BITMAP, WRITE_LOGFILE } WRITE_TYPE;
 
 #ifdef NO_NTFS_DEVICE_DEFAULT_IO_OPS
@@ -159,6 +164,18 @@ struct BITMAP_ALLOCATION {
 	s64	length;		/* count of consecutive clusters */
 } ;
 
+		/* Upcase $Info, used since Windows 8 */
+struct UPCASEINFO {
+	le32	len;
+	le32	filler;
+	le64	crc;
+	le32	osmajor;
+	le32	osminor;
+	le32	build;
+	le16	packmajor;
+	le16	packminor;
+} ;
+
 /**
  * global variables
  */
@@ -168,6 +185,7 @@ static u8		  *g_mft_bitmap		  = NULL;
 static int		   g_lcn_bitmap_byte_size = 0;
 static int		   g_dynamic_buf_size	  = 0;
 static u8		  *g_dynamic_buf	  = NULL;
+static struct UPCASEINFO  *g_upcaseinfo		  = NULL;
 static runlist		  *g_rl_mft		  = NULL;
 static runlist		  *g_rl_mft_bmp		  = NULL;
 static runlist		  *g_rl_mftmirr		  = NULL;
@@ -269,8 +287,55 @@ static void mkntfs_version(void)
 	ntfs_log_info("Copyright (c) 2002-2006 Szabolcs Szakacsits\n");
 	ntfs_log_info("Copyright (c) 2005      Erik Sornes\n");
 	ntfs_log_info("Copyright (c) 2007      Yura Pakhuchiy\n");
-	ntfs_log_info("Copyright (c) 2010      Jean-Pierre Andre\n");
+	ntfs_log_info("Copyright (c) 2010-2014 Jean-Pierre Andre\n");
 	ntfs_log_info("\n%s\n%s%s\n", ntfs_gpl, ntfs_bugs, ntfs_home);
+}
+
+/*
+ *  crc64, adapted from http://rpm5.org/docs/api/digest_8c-source.html
+ * ECMA-182 polynomial, see
+ *     http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-182.pdf
+ */
+		/* make sure the needed types are defined */
+#undef byte
+#undef uint32_t
+#undef uint64_t
+#define byte u8
+#define uint32_t u32
+#define uint64_t u64
+static uint64_t crc64(uint64_t crc, const byte * data, size_t size)
+	/*@*/
+{
+	static uint64_t polynomial = 0x9a6c9329ac4bc9b5ULL;
+	static uint64_t xorout = 0xffffffffffffffffULL;
+	static uint64_t table[256];
+
+	crc ^= xorout;
+
+	if (data == NULL) {
+	/* generate the table of CRC remainders for all possible bytes */
+		uint64_t c;
+		uint32_t i, j;
+		for (i = 0;  i < 256;  i++) {
+			c = i;
+			for (j = 0;  j < 8;  j++) {
+				if (c & 1)
+					c = polynomial ^ (c >> 1);
+				else
+					c = (c >> 1);
+			}
+			table[i] = c;
+		}
+	} else
+		while (size) {
+			crc = table[(crc ^ *data) & 0xff] ^ (crc >> 8);
+			size--;
+			data++;
+		}
+
+	crc ^= xorout;
+
+	return crc;
 }
 
 /*
@@ -525,7 +590,7 @@ static void mkntfs_init_options(struct mkntfs_options *opts2)
 /**
  * mkntfs_parse_options
  */
-static BOOL mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *opts2)
+static int mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *opts2)
 {
 	static const char *sopt = "-c:CfFhH:IlL:np:qQs:S:TUvVz:";
 	static const struct option lopt[] = {
@@ -555,6 +620,7 @@ static BOOL mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *
 
 	int c = -1;
 	int lic = 0;
+	int help = 0;
 	int err = 0;
 	int ver = 0;
 
@@ -596,7 +662,7 @@ static BOOL mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *
 				err++;
 			break;
 		case 'h':
-			err++;	/* display help */
+			help++;	/* display help */
 			break;
 		case 'I':
 			opts2->disable_indexing = TRUE;
@@ -680,7 +746,7 @@ static BOOL mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *
 		}
 	}
 
-	if (!err && !ver && !lic) {
+	if (!err && !help && !ver && !lic) {
 		if (opts2->dev_name == NULL) {
 			if (argc > 1)
 				ntfs_log_error("You must specify a device.\n");
@@ -692,10 +758,11 @@ static BOOL mkntfs_parse_options(int argc, char *argv[], struct mkntfs_options *
 		mkntfs_version();
 	if (lic)
 		mkntfs_license();
-	if (err)
+	if (err || help)
 		mkntfs_usage();
 
-	return (!err && !ver && !lic);
+		/* tri-state 0 : done, 1 : error, -1 : proceed */
+	return (err ? 1 : (help || ver || lic ? 0 : -1));
 }
 
 
@@ -1783,7 +1850,7 @@ static int insert_resident_attr_in_mft_record(MFT_RECORD *m,
 	}
 	a = ctx->attr;
 	/* sizeof(resident attribute record header) == 24 */
-	asize = ((24 + ((name_len + 7) & ~7) + val_len) + 7) & ~7;
+	asize = ((24 + ((name_len*2 + 7) & ~7) + val_len) + 7) & ~7;
 	err = make_room_for_attribute(m, (char*)a, asize);
 	if (err == -ENOSPC) {
 		/*
@@ -1826,7 +1893,7 @@ static int insert_resident_attr_in_mft_record(MFT_RECORD *m,
 	m->next_attr_instance = cpu_to_le16((le16_to_cpu(m->next_attr_instance)
 			+ 1) & 0xffff);
 	a->value_length = cpu_to_le32(val_len);
-	a->value_offset = cpu_to_le16(24 + ((name_len + 7) & ~7));
+	a->value_offset = cpu_to_le16(24 + ((name_len*2 + 7) & ~7));
 	a->resident_flags = res_flags;
 	a->reservedR = 0;
 	if (name_len)
@@ -2136,8 +2203,9 @@ static int add_attr_data_positioned(MFT_RECORD *m, const char *name,
  * Create volume name attribute specifying the volume name @vol_name as a null
  * terminated char string of length @vol_name_len (number of characters not
  * including the terminating null), which is converted internally to a little
- * endian ntfschar string. The name is at least 1 character long and at most
- * 0xff characters long (not counting the terminating null).
+ * endian ntfschar string. The name is at least 1 character long (though
+ * Windows accepts zero characters), and at most 128 characters long (not
+ * counting the terminating null).
  *
  * Return 0 on success or -errno on error.
  */
@@ -2149,10 +2217,10 @@ static int add_attr_vol_name(MFT_RECORD *m, const char *vol_name,
 	int i;
 
 	if (vol_name) {
-		uname_len = ntfs_mbstoucs_libntfscompat(vol_name, &uname, 0);
+		uname_len = ntfs_mbstoucs(vol_name, &uname);
 		if (uname_len < 0)
 			return -errno;
-		if (uname_len > 0xff) {
+		if (uname_len > 128) {
 			free(uname);
 			return -ENAMETOOLONG;
 		}
@@ -2241,8 +2309,8 @@ static int add_attr_index_root(MFT_RECORD *m, const char *name,
 			 free(r);
 			 return -EINVAL;
 		}
-		r->clusters_per_index_block = index_block_size /
-				opts.sector_size;
+		r->clusters_per_index_block = index_block_size
+				>> NTFS_BLOCK_SIZE_BITS;
 	}
 	memset(&r->reserved, 0, sizeof(r->reserved));
 	r->index.entries_offset = const_cpu_to_le32(sizeof(INDEX_HEADER));
@@ -3482,10 +3550,6 @@ static long mkntfs_get_page_size(void)
 	long page_size;
 #ifdef _SC_PAGESIZE
 	page_size = sysconf(_SC_PAGESIZE);
-	if (page_size < 0)
-#endif
-#ifdef _SC_PAGE_SIZE
-		page_size = sysconf(_SC_PAGE_SIZE);
 	if (page_size < 0)
 #endif
 	{
@@ -4749,6 +4813,14 @@ static BOOL mkntfs_create_root_structures(void)
 	m = (MFT_RECORD*)(g_buf + 0xa * g_vol->mft_record_size);
 	err = add_attr_data(m, NULL, 0, CASE_SENSITIVE, const_cpu_to_le16(0),
 			(u8*)g_vol->upcase, g_vol->upcase_len << 1);
+	/*
+	 * The $Info only exists since Windows 8, but it apparently
+	 * does not disturb chkdsk from earlier versions.
+	 */
+	if (!err)
+		err = add_attr_data(m, "$Info", 5, CASE_SENSITIVE,
+			const_cpu_to_le16(0),
+			(u8*)g_upcaseinfo, sizeof(struct UPCASEINFO));
 	if (!err)
 		err = create_hardlink(g_index_block, root_ref, m,
 				MK_LE_MREF(FILE_UpCase, FILE_UpCase),
@@ -4879,6 +4951,7 @@ static BOOL mkntfs_create_root_structures(void)
  */
 static int mkntfs_redirect(struct mkntfs_options *opts2)
 {
+	u64 upcase_crc;
 	int result = 1;
 	ntfs_attr_search_ctx *ctx = NULL;
 	long long lw, pos;
@@ -4912,12 +4985,20 @@ static int mkntfs_redirect(struct mkntfs_options *opts2)
 	if (opts.cluster_size >= 0)
 		g_vol->cluster_size = opts.cluster_size;
 	/* Length is in unicode characters. */
-	g_vol->upcase_len = 65536;
-	g_vol->upcase = ntfs_malloc(g_vol->upcase_len * sizeof(ntfschar));
-	if (!g_vol->upcase)
+	g_vol->upcase_len = ntfs_upcase_build_default(&g_vol->upcase);
+	/* Since Windows 8, there is a $Info stream in $UpCase */
+	g_upcaseinfo =
+		(struct UPCASEINFO*)ntfs_malloc(sizeof(struct UPCASEINFO));
+	if (!g_vol->upcase_len || !g_upcaseinfo)
 		goto done;
-	ntfs_upcase_table_build(g_vol->upcase,
+	/* If the CRC is correct, chkdsk does not warn about obsolete table */
+	crc64(0,(byte*)NULL,0); /* initialize the crc computation */
+	upcase_crc = crc64(0,(byte*)g_vol->upcase,
 			g_vol->upcase_len * sizeof(ntfschar));
+	/* keep the version fields as zero */
+	memset(g_upcaseinfo, 0, sizeof(struct UPCASEINFO));
+	g_upcaseinfo->len = cpu_to_le32(sizeof(struct UPCASEINFO));
+	g_upcaseinfo->crc = cpu_to_le64(upcase_crc);
 	g_vol->attrdef = ntfs_malloc(sizeof(attrdef_ntfs3x_array));
 	if (!g_vol->attrdef) {
 		ntfs_log_perror("Could not create attrdef structure");
@@ -5089,10 +5170,11 @@ int main(int argc, char *argv[])
 
 	mkntfs_init_options(&opts);			/* Set up the options */
 
-	if (!mkntfs_parse_options(argc, argv, &opts))	/* Read the command line options */
-		goto done;
+			/* Read the command line options */
+	result = mkntfs_parse_options(argc, argv, &opts);
 
-	result = mkntfs_redirect(&opts);
-done:
+	if (result < 0)
+		result = mkntfs_redirect(&opts);
+
 	return result;
 }

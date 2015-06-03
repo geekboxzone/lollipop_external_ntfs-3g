@@ -28,6 +28,8 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../include/fuse-lite
 
 LOCAL_CFLAGS := -O2 -g -W -Wall \
+	-D_LARGEFILE_SOURCE \
+	-D_FILE_OFFSET_BITS=64 \
 	-DHAVE_CONFIG_H
 
 LOCAL_PRELINK_MODULE := false

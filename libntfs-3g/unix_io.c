@@ -277,16 +277,7 @@ static s64 ntfs_device_unix_io_write(struct ntfs_device *dev, const void *buf,
 static s64 ntfs_device_unix_io_pread(struct ntfs_device *dev, void *buf,
 		s64 count, s64 offset)
 {
-    s64 ret;
-    if (lseek64(DEV_FD(dev), offset, SEEK_SET) != offset) {
-		ntfs_log_perror("seek for pread fail");
-    }
-	
-	ret = read(DEV_FD(dev), buf, count);
-	if (!ret) {
-		ntfs_log_perror("read device fail, errno: %d", errno);
-	}
-	return ret;
+	return pread64(DEV_FD(dev), buf, count, offset);
 }
 
 /**
@@ -308,11 +299,7 @@ static s64 ntfs_device_unix_io_pwrite(struct ntfs_device *dev, const void *buf,
 		return -1;
 	}
 	NDevSetDirty(dev);
-	
-	if (lseek64(DEV_FD(dev), offset, SEEK_SET) != offset) {
-		ntfs_log_perror("seek for pwrite fail");
-    }
-	return write(DEV_FD(dev), buf, count);
+	return pwrite64(DEV_FD(dev), buf, count, offset);
 }
 
 /**

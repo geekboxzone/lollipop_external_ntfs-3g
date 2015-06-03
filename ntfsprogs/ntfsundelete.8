@@ -1,7 +1,7 @@
 .\" Copyright (c) 2002\-2005 Richard Russon.
 .\" This file may be copied under the terms of the GNU Public License.
 .\"
-.TH NTFSUNDELETE 8 "November 2005" "ntfs-3g 2011.4.12"
+.TH NTFSUNDELETE 8 "November 2005" "ntfs-3g 2015.3.14"
 .SH NAME
 ntfsundelete \- recover a deleted file from an NTFS volume.
 .SH SYNOPSIS
@@ -187,8 +187,8 @@ options, respectively.
 The output of scan will be:
 .sp
 .nf
-Inode  Flags  %age     Date      Size  Filename
- 6038  FN..    93%  2002\-07\-17  26629  thesis.doc
+Inode  Flags  %age     Date    Time    Size  Filename
+ 6038  FN..    93%  2002\-07\-17 13:42  26629  thesis.doc
 .fi
 .TS
 box;
@@ -283,11 +283,11 @@ Undelete inodes 2, 5 and 100 to 131 of device /dev/sda1
 .B ntfsundelete /dev/sda1 \-u \-i 2,5,100\-131
 .sp
 .RE
-Undelete inode number 3689, call the file 'work.doc' and put it in the user's
-home directory.
+Undelete inode number 3689, call the file 'work.doc', set it to recovered
+size and put it in the user's home directory.
 .RS
 .sp
-.B ntfsundelete /dev/hda1 \-u \-i 3689 \-o work.doc \-d ~
+.B ntfsundelete /dev/hda1 \-u \-T \-i 3689 \-o work.doc \-d ~
 .sp
 .RE
 Save MFT Records 3689 to 3690 to a file 'debug'
@@ -318,12 +318,6 @@ package and is available from:
 .br
 .nh
 http://www.tuxera.com/community/
-.hy
-.sp
-The manual pages are available online at:
-.br
-.nh
-http://man.linux-ntfs.org/
 .hy
 .SH SEE ALSO
 .BR ntfsinfo (8),

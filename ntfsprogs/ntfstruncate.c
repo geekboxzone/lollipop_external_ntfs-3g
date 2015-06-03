@@ -137,7 +137,7 @@ static void license(void)
  * usage - print a list of the parameters to the program
  */
 __attribute__((noreturn))
-static void usage(void)
+static void usage(int ret)
 {
 	copyright();
 	fprintf(stderr, "Usage: %s [options] device inode [attr-type "
@@ -155,7 +155,7 @@ static void usage(void)
 			"    -l    Display licensing information\n"
 			"    -h    Display this help\n", EXEC_NAME);
 	fprintf(stderr, "%s%s", ntfs_bugs, ntfs_home);
-	exit(1);
+	exit(ret);
 }
 
 /**
@@ -194,12 +194,13 @@ static void parse_options(int argc, char *argv[])
 			license();
 			exit(0);
 		case 'h':
+			usage(0);
 		case '?':
 		default:
-			usage();
+			usage(1);
 		}
 	if (optind == argc)
-		usage();
+		usage(1);
 
 	if (opts.verbose > 1)
 		ntfs_log_set_levels(NTFS_LOG_LEVEL_DEBUG | NTFS_LOG_LEVEL_TRACE |
@@ -210,7 +211,7 @@ static void parse_options(int argc, char *argv[])
 	ntfs_log_verbose("device name = %s\n", dev_name);
 
 	if (optind == argc)
-		usage();
+		usage(1);
 
 	/* Get the inode. */
 	ll = strtoll(argv[optind++], &s, 0);
@@ -220,7 +221,7 @@ static void parse_options(int argc, char *argv[])
 	ntfs_log_verbose("inode = %lli\n", (long long)inode);
 
 	if (optind == argc)
-		usage();
+		usage(1);
 
 	/* Get the attribute type, if specified. */
 	s = argv[optind++];
@@ -241,7 +242,7 @@ static void parse_options(int argc, char *argv[])
 		s = argv[optind++];
 		if (optind != argc) {
 			/* Convert the string to little endian Unicode. */
-			attr_name_len = ntfs_mbstoucs_libntfscompat(s, &attr_name, 0);
+			attr_name_len = ntfs_mbstoucs(s, &attr_name);
 			if ((int)attr_name_len < 0)
 				err_exit("Invalid attribute name \"%s\": %s\n",
 						s, strerror(errno));
@@ -251,7 +252,7 @@ static void parse_options(int argc, char *argv[])
 
 			s = argv[optind++];
 			if (optind != argc)
-				usage();
+				usage(1);
 		} else {
 			attr_name = AT_UNNAMED;
 			attr_name_len = 0;
@@ -270,7 +271,7 @@ static void parse_options(int argc, char *argv[])
 	if (*s2 || ll < 0 || (ll >= LLONG_MAX && errno == ERANGE))
 		err_exit("Invalid new length: %s\n", s);
 	new_len = ll;
-	ntfs_log_verbose("new length = %lli\n", new_len);
+	ntfs_log_verbose("new length = %lli\n", (long long)new_len);
 }
 
 /**
@@ -737,7 +738,7 @@ int main(int argc, char **argv)
 	/* Mount the device. */
 	if (opts.no_action) {
 		ntfs_log_quiet("Running in READ-ONLY mode!\n");
-		ul = MS_RDONLY;
+		ul = NTFS_MNT_RDONLY;
 	} else
 		ul = 0;
 	vol = ntfs_mount(dev_name, ul);

@@ -154,8 +154,8 @@ typedef int BOOL;   /* Already defined in windows.h */
 typedef u32 DWORD; /* must be 32 bits whatever the platform */
 typedef DWORD *LPDWORD;
 
-#define MS_NONE 0    /* no flag for mounting the device */
-#define MS_RDONLY 1  /* flag for mounting the device read-only */
+#define NTFS_MNT_NONE 0    /* no flag for mounting the device */
+#define NTFS_MNT_RDONLY 1  /* flag for mounting the device read-only */
 
 #endif /* WIN32 */
 
@@ -220,14 +220,6 @@ typedef DWORD *LPDWORD;
 #define SE_SACL_AUTO_INHERIT_REQ   cpu_to_le16(0x200)
 
 typedef le16 ntfschar;
-
-typedef struct {
-	le32 a;
-	le16 b,c;
-	struct {
-		le16 m,n,o,p,  q,r,s,t;
-	} ;
-} GUID;
 
 #define ntfs_log_error(args...) do { printf("** " args); if (!isatty(1)) fprintf(stderr,args); } while(0)
 
@@ -524,7 +516,8 @@ enum {
 #define CONTAINER_INHERIT_ACE		  (0x2)
 #define NO_PROPAGATE_INHERIT_ACE	  (0x4)
 #define INHERIT_ONLY_ACE		  (0x8)
-#define VALID_INHERIT_FLAGS		  (0xF)
+#define INHERITED_ACE			  (0x10)
+#define VALID_INHERIT_FLAGS		  (0x1F)
 
 /*
  *	     Other useful definitions
@@ -539,6 +532,12 @@ enum {
 
 #ifndef ACL_REVISION_DS	/* not always defined in <windows.h> */
 #define ACL_REVISION_DS 4
+#endif
+
+#ifndef INHERITED_ACE /* not always defined in <windows.h> */
+#define INHERITED_ACE			  (0x10)
+#undef VALID_INHERIT_FLAGS
+#define VALID_INHERIT_FLAGS		  (0x1F)
 #endif
 
 /*
@@ -562,12 +561,14 @@ enum {
           /* flags tested for meaning exec, write or read */
 	  /* tests for write allow for interpretation of a sticky bit */
 
-#define FILE_GREAD (FILE_READ_DATA | GENERIC_READ)
-#define FILE_GWRITE (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE)
-#define FILE_GEXEC (FILE_EXECUTE | GENERIC_EXECUTE)
-#define DIR_GREAD (FILE_LIST_DIRECTORY | GENERIC_READ)
-#define DIR_GWRITE (FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | GENERIC_WRITE)
-#define DIR_GEXEC (FILE_TRAVERSE | GENERIC_EXECUTE)
+#define FILE_GREAD (FILE_READ_DATA | GENERIC_READ | GENERIC_ALL)
+#define FILE_GWRITE (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE \
+			| GENERIC_ALL)
+#define FILE_GEXEC (FILE_EXECUTE | GENERIC_EXECUTE | GENERIC_ALL)
+#define DIR_GREAD (FILE_LIST_DIRECTORY | GENERIC_READ | GENERIC_ALL)
+#define DIR_GWRITE (FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | GENERIC_WRITE \
+			| GENERIC_ALL)
+#define DIR_GEXEC (FILE_TRAVERSE | GENERIC_EXECUTE | GENERIC_ALL)
 
 	/* standard owner (and administrator) rights */
 
@@ -717,6 +718,12 @@ void *chkcalloc(size_t, size_t, const char *, int);
 void chkfree(void*, const char*, int);
 BOOL chkisalloc(void*, const char*, int);
 void dumpalloc(const char*);
+
+#define malloc(sz) chkmalloc(sz, __FILE__, __LINE__)
+#define calloc(cnt,sz) chkcalloc(cnt, sz, __FILE__, __LINE__)
+#define free(ptr) chkfree(ptr, __FILE__, __LINE__)
+#define isalloc(ptr) chkisalloc(ptr, __FILE__, __LINE__)
+#define ntfs_malloc(sz) chkmalloc(sz, __FILE__, __LINE__)
 
 struct passwd *getpwnam(const char *user);
 struct group *getgrnam(const char *group);

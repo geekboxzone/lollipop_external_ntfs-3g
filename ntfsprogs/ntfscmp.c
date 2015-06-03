@@ -704,7 +704,7 @@ static void cmp_attribute(ntfs_attr_search_ctx *ctx1,
 		 * If difference exists then it's already reported at the
 		 * attribute header since the mapping pairs must differ.
 		 */
-		return;
+		goto close_attribs;
 	}
 
 	if (na1->type == AT_INDEX_ALLOCATION)
@@ -969,7 +969,7 @@ static ntfs_volume *mount_volume(const char *volume)
 				 "You must 'umount' it first.\n", volume);
 	}
 
-	vol = ntfs_mount(volume, MS_RDONLY);
+	vol = ntfs_mount(volume, NTFS_MNT_RDONLY);
 	if (vol == NULL) {
 
 		int err = errno;

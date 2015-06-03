@@ -14,7 +14,9 @@ LOCAL_SRC_FILES := \
 	debug.c \
 	device.c \
 	dir.c \
+	ea.c \
 	efs.c \
+	ioctl.c \
 	index.c \
 	inode.c \
 	lcnalloc.c \
@@ -26,6 +28,7 @@ LOCAL_SRC_FILES := \
 	object_id.c \
 	reparse.c \
 	runlist.c \
+	realpath.c \
 	security.c \
 	unistr.c \
 	volume.c \

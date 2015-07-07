@@ -12,7 +12,7 @@ LOCAL_SRC_FILES :=  \
 	utils.c 
 
 LOCAL_MODULE := mkntfs
-LOCAL_MODULE_TAGS := eng
+LOCAL_MODULE_TAGS := optional
 
 LOCAL_SHARED_LIBRARIES := libntfs-3g
 
@@ -33,7 +33,7 @@ LOCAL_SRC_FILES :=  \
 	utils.c
 
 LOCAL_MODULE := ntfsfix
-LOCAL_MODULE_TAGS := eng
+LOCAL_MODULE_TAGS := optional
 
 LOCAL_SHARED_LIBRARIES := libntfs-3g
 

@@ -225,6 +225,7 @@ char *parse_mount_options(ntfs_fuse_context_t *ctx,
 			const struct ntfs_options *popts, BOOL low_fuse)
 {
 	char *options, *s, *opt, *val, *ret = NULL;
+     char *sz_device = NULL;
 	const char *orig_opts = popts->options;
 	BOOL no_def_opts = FALSE;
 	int default_permissions = 0;
@@ -523,7 +524,14 @@ char *parse_mount_options(ntfs_fuse_context_t *ctx,
 	
 	if (ntfs_strappend(&ret, "fsname="))
 		goto err_exit;
-	if (ntfs_strappend(&ret, popts->device))
+    sz_device = malloc(strlen(popts->device) + 1);
+    if (!sz_device)
+         goto err_exit;
+    strcpy(sz_device, popts->device);
+    char *r_device = strchr(sz_device, ',');
+    if (r_device)
+        r_device[0] = '@';
+    if (ntfs_strappend(&ret, sz_device))
 		goto err_exit;
 	if (permissions && !acl)
 		ctx->secure_flags |= (1 << SECURITY_DEFAULT);
@@ -536,6 +544,8 @@ char *parse_mount_options(ntfs_fuse_context_t *ctx,
 		ctx->hiberfile = FALSE;
 	}
 exit:
+    if (sz_device)
+        free(sz_device);
 	free(options);
 	return ret;
 err_exit:

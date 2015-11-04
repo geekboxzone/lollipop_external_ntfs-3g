@@ -422,6 +422,11 @@ static int do_mount(const char *mnt, char **typep, mode_t rootmode,
     else
         strcpy(source, dev);
 
+    char * rchr = strchr(source, '@');
+    if (rchr) {
+         rchr[0] = ',';
+    }
+
     if (restore_privs())
 	goto err;
     
